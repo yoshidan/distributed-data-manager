@@ -1,0 +1,94 @@
+{% extends "templates/base.html" %}
+{% block content %}
+<div class="row-fluid">
+    <legend>Group</legend>
+    <form action="/group" method="POST">
+        <div class="control-group navbar-left" style="margin-right:10px">
+            <label class="control-label" for="name">シャードグループ</label>
+            <div class="controls">
+                <input value="{{group.name}}" id="name" disabled type="text" name="name" required class="form-control" style="width:200px">
+            </div>
+        </div>
+        <div class="control-group navbar-left" style="margin-right:10px">
+            <label class="control-label" for="database">データベース種別</label>
+            <div class="controls">
+                <input value="{{group.database}}" id="database" disabled type="text" name="database" required class="form-control" style="width:200px">
+            </div>
+        </div>
+        <div class="control-group navbar-left" style="margin-right:10px">
+            <label class="control-label" for="virtualcount">仮想ノード数</label>
+            <div class="controls">
+                <input value="{{group.virtualcount}}" id="virtualcount" disabled type="text" name="virtualcount" required class="form-control" style="width:100px" maxlength="3">
+            </div>
+        </div>
+        <div class="control-group">
+            <label class="control-label" for="hashfunction">ハッシュ関数</label>
+            <div class="controls">
+                <input value="{{group.hashfunction}}" id="hashfunction" disabled type="text" name="hashfunction" required class="form-control" style="width:410px">
+            </div>
+        </div>
+        <br/>
+    </form>
+    <br/>
+    <legend>Shards</legend>
+    <div class="panel panel-default">
+        <div class="panel-heading">Sharded Tables</div>
+        <table class="table table-hover table-condensed">
+            <thead>
+            <tr>
+                <th>URL</th>
+                <th>ユーザ名</th>
+                <th>HASH</th>
+                <th>件数</th>
+                <th>操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for item in shards %}
+            <tr>
+                <td>{{item.url}}</td>
+                <td>{{item.user}}</td>
+                <td>{{item.hashvalue}}</td>
+                <td>{{item.count}}</td>
+                <td>
+                    <button data-group="{{group.name}}" data-url="{{item.url}}" data-user="{{item.user}}" class="ddlcopy btn-xs btn btn-danger" type="submit">RELEASE</button>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <form class="well navbar-form navbar-left" action="/shard" method="POST" style="width:100%">
+        <div class="form-group" style="width:100%">
+            <input type="hidden" value="{{group.name}}" name="groupname">
+            <input value="{{url}}" id="url" name="url" style="width:50%" required class="form-control input-large" placeholder="thin:@@192.168.33.22:1521:XE">
+            <input value="{{username}}" id="username" name="username" style="width:15%" required class="form-control input-small" placeholder="Username">
+            <input value="{{password}}" id="password" type="password" name="password" style="width:15%" required class="form-control input-small" placeholder="Password">
+            <button class="btn btn-primary" type="submit">追加</button>
+        </div>
+    </form>
+    <form action="rebalance" method=""POST>
+        <input type="hidden" value="{{group.name}}" name="groupname">
+        <button class="btn btn-primary" type="submit">リバランス</button>
+    </form>
+    <br/>
+</div>
+<script>
+   $(document).ready (
+        function(e) {
+            $(".ddlcopy").click(function() {
+                 var url = $(this).attr("data-url");
+                 var user = $(this).attr("data-user");
+                 var group = $(this).attr("data-group");
+                 $.ajax({
+                     type : "GET",
+                     url : "/group/showddl",
+                     data: { url: url, user: user , groupname:group }
+                 }).done(function(data) {
+                     $("#ddl").val(data);
+                 });
+            });
+        }
+    );
+</script>
+{% endblock %}

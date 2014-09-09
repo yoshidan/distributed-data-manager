@@ -1,0 +1,130 @@
+{% extends "templates/base.html" %}
+{% block content %}
+<legend>検索条件</legend>
+<form class="well navbar-form navbar-left" action="/search" method="POST" style="width:100%">
+    <div class="form-group" style="width:100%">
+        <input value="{{url}}" type="text" id="url" name="url"
+               style="width:40%" required class="form-control input-large" placeholder="thin:@@192.168.33.22:1521:XE">
+        <select value="{{dialect}}" id="dialect" name="dialect" style="width:10%" class="form-control">
+            <option value="oracle">ORACLE</option>
+            <option value="mysql">MYSQL</option>
+            <option value="postgres">POSTGRES</option>
+        </select>
+        <input value="{{username}}" type="text" id="username" name="username"
+               style="width:15%" required class="form-control input-small" placeholder="username">
+        <input value="{{password}}" type="text" id="password" name="password"
+               style="width:15%" required class="form-control input-small" placeholder="password">
+        <button type="submit" class="btn btn-default">テーブル検索</button>
+    </div>
+</form>
+<div class="row-fluid">
+    <legend>検索結果</legend>
+    <form id="group_form" action="/group/init" method="POST">
+        <input type="hidden" name="url" value="{{url}}"/>
+        <input type="hidden" name="username" value="{{username}}"/>
+        <input type="hidden" name="password" value="{{password}}"/>
+        <input type="hidden" name="dialect" value="{{dialect}}"/>
+        <input type="hidden" name="tables" id="tables" />
+        <input type="hidden" name="virtualcounts" id="virtualcounts"/>
+        <input type="hidden" name="hashfunctions" id="hashfunctions"/>
+        <input type="hidden" name="keycolumns" id="keycolumns"/>
+        <table class="table table-hover table-condensed">
+            <thead>
+            <tr>
+                <th>構成</th>
+                <th>テーブル名</th>
+                <th width="10%">物理ノード数</th>
+                <th width="10%">仮想ノード数</th>
+                <th>分割キー列</th>
+                <th>HASH関数</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for item in result %}
+            <tr>
+                <td>
+                    {% if item.group.name %}
+                        <a href="/group?groupname={{item.group.name}}"><span class="glyphicon glyphicon-ok"></span></a>
+                    {% else %}
+                         <input type="checkbox" data-table="{{item.table}}">
+                    {% endif %}
+                </td>
+                <td>{{item.table}}</td>
+                <td>
+                    <span>{{item.shards}}</span>
+                </td>
+                <td>
+                    {% if item.group.name %}
+                    <span>{{item.group.virtualcount}}</span>
+                    {% else %}
+                    <input id="v_{{item.table}}"  class="form-control" maxlength="3">
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.group.name %}
+                        <span>{{item.group.keycolumn}}</span>
+                    {% else %}
+                        <select id="k_{{item.table}}" class="form-control">
+                            {% for column in item.columns %}
+                                <option name="{{column}}">{{column}}</option>
+                            {% endfor %}
+                        </select>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.group.name %}
+                        <input disabled class="form-control" value="{{item.group.hashfunction}}">
+                    {% else %}
+                         <input id="h_{{item.table}}" class="form-control">
+                    {% endif %}
+                </td>
+
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <button type="submit" class="btn btn-primary" id="join">構成開始 or 参加</button>
+    </form>
+    <br/>
+</div>
+<script>
+    $(document).ready(function(){
+        $("#join").click(function(){
+            var tables = "";
+            var hashfunctions = "";
+            var virtualcounts = "";
+            var keycolumns = "";
+            var success = true;
+            $("input:checked").each(function() {
+                var table = $(this).attr("data-table");
+                tables = tables + table + " ";
+                var vCount = $("#v_" + table).val();
+                var hash = $("#h_" + table).val();
+                var keycolumn = $("#k_" + table).val();
+                if(!vCount){
+                    $("#v_" + table).css("background-color" ,"red");
+                    success = false;
+                }
+                if(!hash){
+                    $("#h_" + table).css("background-color" ,"red");
+                    success = false;
+                }
+                keycolumns = keycolumns + keycolumn + " ";
+                virtualcounts = virtualcounts + vCount  + " ";
+                hashfunctions = hashfunctions + hash + " ";
+            });
+            $("#tables").val(tables);
+            $("#virtualcounts").val(virtualcounts);
+            $("#hashfunctions").val(hashfunctions);
+            $("#keycolumns").val(keycolumns);
+            if(!tables) {
+                success=false;
+            }
+            if(!success) {
+                alert("バリデーションエラーがあります");
+            }
+            return success;
+        });
+    });
+</script>
+{% endblock %}
