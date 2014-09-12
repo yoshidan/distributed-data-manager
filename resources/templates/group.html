@@ -1,6 +1,14 @@
 {% extends "templates/base.html" %}
 {% block content %}
 <div class="row-fluid">
+
+    {% if info %}
+        <div class="alert alert-success" role="alert">{{info}}</div>
+    {% endif %}
+    {% if error %}
+        <div class="alert alert-danger" role="alert">{{error}}</div>
+    {% endif %}
+
     <legend>Group</legend>
     <form action="/group" method="POST">
         <div class="control-group navbar-left" style="margin-right:10px">

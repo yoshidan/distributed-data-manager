@@ -2,6 +2,7 @@
   (:require [compojure.core :refer :all]
             [clojure.string :as str]
             [noir.response :as noir]
+            [noir.session :as session]
             [data-rebalancer.layout :as layout]
             [data-rebalancer.db.core :as dbcore]
             [data-rebalancer.util :as util]))
@@ -10,7 +11,8 @@
   (layout/render "search.html" {:url "thin:@192.168.33.22:1521:XE"} ))
 
 (defn group-page [groupname]
-  (layout/render "group.html" {:group (dbcore/get-group groupname) :shards (dbcore/search-shards groupname)}))
+  (layout/render "group.html" {:group (dbcore/get-group groupname) :shards (dbcore/search-shards groupname)
+                              :info  (session/flash-get :info) :error (session/flash-get :error)}))
 
 (defn init-group [url username password dialect tables virtualcounts hashfunctions keycolumns]
   (apply list (map #(dbcore/init-group %1 url username password %3 dialect %2 %4)
@@ -22,18 +24,34 @@
                                  :result (dbcore/search url username password dialect)
                                   :url url :username username :password password :dialect dialect}))
 
+;シャード追加
 (defn add-shard [groupname url username password]
-  (dbcore/add-shard groupname url username password)
+  (try
+    (do
+      (dbcore/add-shard groupname url username password)
+      (session/flash-put! :info "Add Complete "))
+  (catch Exception e
+    (do
+      (.printStackTrace e)
+      (session/flash-put! :error (str "Add Error : " (.getMessage e) )))))
   (noir/redirect (str "/group?groupname=" groupname )))
 
 ;リバランス処理
 (defn rebalance [groupname]
-  (dbcore/rebalance groupname)
+  (try
+    (session/flash-put! :info (str "Rebalance Complete" (dbcore/rebalance groupname)))
+    (catch Exception e
+        (.printStackTrace e)
+        (session/flash-put! :error (str "Release Error : " (.getMessage e) ))))
   (noir/redirect (str "/group?groupname=" groupname )))
 
 ;リリース処理
 (defn release [groupname url user]
-  (dbcore/release groupname url user)
+  (try
+    (session/flash-put! :info (str "Release Complete" (dbcore/release groupname url user)))
+    (catch Exception e
+      (.printStackTrace e)
+      (session/flash-put! :error (str "Release Error : " (.getMessage e) ))))
   (noir/redirect (str "/group?groupname=" groupname )))
 
 (defn home-page []

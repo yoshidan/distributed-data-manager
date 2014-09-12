@@ -92,11 +92,12 @@
          ;抽出もとから抜いて自分に一括登録
          (with-open [rseq (.executeQuery sourcestmt)]
            (transaction
-             (println (count (for [splited (partition-all 10000 (resultset-seq rseq))]
+             ;ここは現実化しないと大変なことになる
+             (doall (for [splited (partition-all 10000 (resultset-seq rseq))]
                 (apply sql/db-do-prepared destdb
                     (format "INSERT INTO %s VALUES (%s)" groupname
                       (clojure.string/join ", " (repeat (.getColumnCount (.getMetaData rseq)) "?" )))
-                    (for [row splited] (vals row))))))))
+                    (for [row splited] (vals row)))))))
          ;元データの消し込み
          (sql/execute! sourcedb
            [(format "DELETE FROM %s WHERE %s %s ? " groupname hashcolumn direction) hash]))))
@@ -124,22 +125,23 @@
 (defn release [groupname url user]
   (transaction
     (let [group (first (select groups (where {:name groupname})))
+          groupshards (select shards (where {:groupname groupname}))
           current (first (select shards (where {:groupname groupname :url url :user user})))
           sourcedb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url current)
                     :user (:user current) :password (:password current)}
           nearlestLess (first (select shards (where (and (= :groupname groupname) (< :hashvalue (:hashvalue current)))) (order :hashvalue :DESC) (limit 1) ))]
-      (if (or (empty? group) (empty? current))
-        (throw (IllegalStateException. "can not remove last one"))
+      (if (or (empty? group) (>= 1 (count groupshards)))
+        (throw (IllegalStateException. "can' remove because this is last one"))
         (if (empty? nearlestLess)
-          ;一つ前のものがなければ最大ハッシュのノードに全件格納(
-          (let [biggest (first (select shards (where {:groupname groupname}) (order :hashvalue :DESC) (limit 1)))
-                biggestdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url biggest)
-                            :user (:user biggest) :password (:password biggest)}]
-              (move-record group ">=" biggestdb sourcedb 0))
+          ;一つ前のものがなければ、1個上のものに全件移動     TODO
+          (let [nearlestBigger  (first (select shards (where (and (= :groupname groupname) (> :hashvalue (:hashvalue current)))) (order :hashvalue :ASC) (limit 1) ))
+                biggerdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url nearlestBigger)
+                            :user (:user nearlestBigger) :password (:password nearlestBigger)}]
+              (move-record group ">=" biggerdb sourcedb 0))
           ;現在のノードのレコードを一つhashが小さい前のノードに全件移動する
           (let [leastdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url nearlestLess)
                            :user (:user nearlestLess) :password (:password nearlestLess)}]
               (move-record group ">=" leastdb sourcedb 0))))
-      (delete shards (where {:id (:id current)})))))
+     (delete shards (where {:id (:id current)})))))
 
 
