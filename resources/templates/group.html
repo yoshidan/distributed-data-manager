@@ -4,27 +4,33 @@
     <legend>Group</legend>
     <form action="/group" method="POST">
         <div class="control-group navbar-left" style="margin-right:10px">
-            <label class="control-label" for="name">シャードグループ</label>
+            <label class="control-label" for="name">Table</label>
             <div class="controls">
                 <input value="{{group.name}}" id="name" disabled type="text" name="name" required class="form-control" style="width:200px">
             </div>
         </div>
         <div class="control-group navbar-left" style="margin-right:10px">
-            <label class="control-label" for="database">データベース種別</label>
+            <label class="control-label" for="database">Database</label>
             <div class="controls">
-                <input value="{{group.database}}" id="database" disabled type="text" name="database" required class="form-control" style="width:200px">
+                <input value="{{group.database}}" id="database" disabled type="text" name="database" required class="form-control" style="width:100px">
             </div>
         </div>
         <div class="control-group navbar-left" style="margin-right:10px">
-            <label class="control-label" for="virtualcount">仮想ノード数</label>
+            <label class="control-label" for="keycolumn">Key</label>
+            <div class="controls">
+                <input value="{{group.keycolumn}}" id="keycolumn" disabled type="text" name="keycolumn" required class="form-control" style="width:200px">
+            </div>
+        </div>
+        <div class="control-group navbar-left" style="margin-right:10px">
+            <label class="control-label" for="virtualcount">Virtual</label>
             <div class="controls">
                 <input value="{{group.virtualcount}}" id="virtualcount" disabled type="text" name="virtualcount" required class="form-control" style="width:100px" maxlength="3">
             </div>
         </div>
         <div class="control-group">
-            <label class="control-label" for="hashfunction">ハッシュ関数</label>
+            <label class="control-label" for="hashfunction">Hash</label>
             <div class="controls">
-                <input value="{{group.hashfunction}}" id="hashfunction" disabled type="text" name="hashfunction" required class="form-control" style="width:410px">
+                <input value="{{group.hashfunction}}" id="hashfunction" disabled type="text" name="hashfunction" required class="form-control" style="width:300px">
             </div>
         </div>
         <br/>
@@ -36,11 +42,15 @@
         <table class="table table-hover table-condensed">
             <thead>
             <tr>
-                <th>URL</th>
-                <th>ユーザ名</th>
-                <th>HASH</th>
-                <th>件数</th>
-                <th>操作</th>
+                <th rowspan="2">URL</th>
+                <th rowspan="2">Schema</th>
+                <th rowspan="2">Managing Hash</th>
+                <th colspan="4">Status</th>
+            </tr>
+                <th>Count</th>
+                <th>Max</th>
+                <th>Min</th>
+                <th>Operation</th>
             </tr>
             </thead>
             <tbody>
@@ -49,9 +59,16 @@
                 <td>{{item.url}}</td>
                 <td>{{item.user}}</td>
                 <td>{{item.hashvalue}}</td>
-                <td>{{item.count}}</td>
+                <td>{{item.cnt}}</td>
+                <td>{{item.mx}}</td>
+                <td>{{item.mn}}</td>
                 <td>
-                    <button data-group="{{group.name}}" data-url="{{item.url}}" data-user="{{item.user}}" class="ddlcopy btn-xs btn btn-danger" type="submit">RELEASE</button>
+                    <form method="POST" action="/release">
+                        <input type="hidden" name="groupname" value="{{group.name}}">
+                        <input type="hidden" name="url" value="{{item.url}}">
+                        <input type="hidden" name="user" value="{{item.user}}">
+                        <button class="btn-xs btn btn-danger" type="submit">RELEASE</button>
+                    </form>
                 </td>
             </tr>
             {% endfor %}
@@ -64,12 +81,12 @@
             <input value="{{url}}" id="url" name="url" style="width:50%" required class="form-control input-large" placeholder="thin:@@192.168.33.22:1521:XE">
             <input value="{{username}}" id="username" name="username" style="width:15%" required class="form-control input-small" placeholder="Username">
             <input value="{{password}}" id="password" type="password" name="password" style="width:15%" required class="form-control input-small" placeholder="Password">
-            <button class="btn btn-primary" type="submit">追加</button>
+            <button class="btn btn-primary" type="submit">Add</button>
         </div>
     </form>
-    <form action="rebalance" method=""POST>
+    <form action="rebalance" method="POST">
         <input type="hidden" value="{{group.name}}" name="groupname">
-        <button class="btn btn-primary" type="submit">リバランス</button>
+        <button class="btn btn-primary" type="submit">Rebalance</button>
     </form>
     <br/>
 </div>

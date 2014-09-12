@@ -13,7 +13,7 @@
   (layout/render "group.html" {:group (dbcore/get-group groupname) :shards (dbcore/search-shards groupname)}))
 
 (defn init-group [url username password dialect tables virtualcounts hashfunctions keycolumns]
-  (apply list (map #(dbcore/init-group 1 %1 url username password %3 dialect %2 %4)
+  (apply list (map #(dbcore/init-group %1 url username password %3 dialect %2 %4)
       (str/split tables #"\s+") (str/split virtualcounts #"\s+") (str/split hashfunctions #"\s+") (str/split keycolumns #"\s+")))
   (noir/redirect (str "/group?groupname=" (first (str/split tables #"\s+")) )))
 
@@ -22,11 +22,18 @@
                                  :result (dbcore/search url username password dialect)
                                   :url url :username username :password password :dialect dialect}))
 
-(defn show-ddl [groupname url username]
-  (dbcore/show-ddl groupname url username))
-
 (defn add-shard [groupname url username password]
   (dbcore/add-shard groupname url username password)
+  (noir/redirect (str "/group?groupname=" groupname )))
+
+;リバランス処理
+(defn rebalance [groupname]
+  (dbcore/rebalance groupname)
+  (noir/redirect (str "/group?groupname=" groupname )))
+
+;リリース処理
+(defn release [groupname url user]
+  (dbcore/release groupname url user)
   (noir/redirect (str "/group?groupname=" groupname )))
 
 (defn home-page []
@@ -40,7 +47,9 @@
   (GET "/" [] (home-page))
   (GET "/about" [] (about-page))
   (GET "/search" [] (search-page))
+  (POST "/rebalance" [groupname] (rebalance groupname))
   (POST "/search" [url username password dialect] (search url username password dialect))
   (POST "/shard" [groupname url username password] (add-shard groupname url username password))
   (GET "/group" [groupname] (group-page groupname))
+  (POST "/release" [groupname url user] (release groupname url user))
   (POST "/group/init" [url username password dialect tables virtualcounts hashfunctions keycolumns] (init-group url username password dialect tables virtualcounts hashfunctions keycolumns)))
