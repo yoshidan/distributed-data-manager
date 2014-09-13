@@ -39,7 +39,7 @@
           (let [shardid (:id (first (select shards (where {:groupname groupname :url url :user username}))))]
             (doall (for [x (range (:virtualcount group))]
               (insert virtualshards
-                (values [ {:shardid shardid :virtualname (str url username x)
+                (values [ {:shardid shardid :virtualname (str username x)
                            :hashvalue (get-hash (:database group) url username password
                                         (:hashfunction group) (str url username x))}]))))))))
     (throw (IllegalStateException. "already exists"))) )
@@ -94,15 +94,18 @@
                       (array-map :group g :table t :shards (get-shards t)))))))))))
 
 ;sourceからdestにレコードを移動する
-(defn- move-record [group direction destdb sourcedb hash]
-     (let [groupname (:name group)
-           hashcolumn (format (:hashfunction group) (:keycolumn group))
-           selectquery (format "SELECT * FROM %s WHERE %s %s ? " groupname hashcolumn direction)]
+(defn- move-record [group direction dest source hash]
+   (let [groupname (:name group)
+         sourcedb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url source) :user (:user source) :password (:password source)}
+         destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}
+         hashcolumn (format (:hashfunction group) (:keycolumn group))
+         selectquery (format "SELECT * FROM %s WHERE %s %s ? " groupname hashcolumn direction)]
+     (when-not (= destdb sourcedb)
        (with-open [sourcecon (sql/get-connection sourcedb)
                    sourcestmt (sql/prepare-statement sourcecon selectquery)]
          (.setFetchSize sourcestmt 1000)
          (.setObject sourcestmt 1 hash)
-         (println (:subname sourcedb) "/" (:user sourcedb) " = " selectquery ":" hash "->" (:subname destdb) "/" (:user destdb))
+         (println (:subname sourcedb) "/" (:user sourcedb) "/" (:hashvalue source)  " = " selectquery ":" hash "->" (:subname destdb) "/" (:user destdb) "/" (:hashvalue dest) )
          ;抽出もとから抜いて自分に一括登録
          (with-open [rseq (.executeQuery sourcestmt)]
            (transaction
@@ -114,28 +117,35 @@
                     (for [row splited] (vals row)))))))
          ;元データの消し込み
          (sql/execute! sourcedb
-           [(format "DELETE FROM %s WHERE %s %s ? " groupname hashcolumn direction) hash]))))
+           [(format "DELETE FROM %s WHERE %s %s ? " groupname hashcolumn direction) hash])))))
 
-; 最大hash値を管理するシャードから順に各シャード内の自分以上のhash値を持つレコードをINSERT AND DELETE
-; 最小hash値を管理するシャードが、自分の次の大きさのシャード内の自分のhashより小さいレコードをINSERT AND DELETE
+; 総当たりでBETWEENで全てのノードから収集するようにする　TODO
+; あまった値は最小のノードに突っ込む
 (defn rebalance [groupname]
   (let [group (first (select groups (where {:name groupname})))
-        shards (select shards (where {:groupname groupname}) (order :hashvalue :DESC ))]
-    (letfn [(move [direction dest source-shards hashfunction]
-          (when-not (empty? source-shards)
-            (let [destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group)
-                       :subname (:url dest) :user (:user dest) :password (:password dest)}]
-              (doall (for [source source-shards]
-                  (move-record group direction destdb
-                    {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url source)
-                     :user (:user source) :password (:password source)} (hashfunction dest source))))
-               (recur direction (first source-shards) (rest source-shards) hashfunction))))]
+        pshards (select shards (where {:groupname groupname}))
+        shards  (reverse (sort-by :hashvalue
+              ;applyせずにconcatだけだと全要素を集約する形にならないためconcatされない
+                         (apply concat (for [shard pshards]
+                           (cons shard
+                              (for [v (select virtualshards (where {:shardid (:id shard)}))]
+                                {:hashvalue (:hashvalue v) :url (:url shard) :user (:user shard ) :password (:password shard)}))))))]
+    (letfn [(move [direction dest source-shards hashfunction sourcefunction]
+              (when-not (empty? source-shards)
+                ;重複ノードは排除
+                (doall (for [source (sourcefunction source-shards)]
+                    (move-record group direction dest source (hashfunction dest source))))
+                 (recur direction (first source-shards) (rest source-shards) hashfunction sourcefunction)))]
           ;降順に実行
-          (move ">=" (first shards) (rest shards) (fn [dest source] (:hashvalue dest))  )
+          (move ">=" (first shards) (rest shards) (fn [d s] (:hashvalue d))
+            (fn [sources] (distinct (map #(array-map :user (:user %) :password (:password %) :url (:url %) ) sources))))
           ;昇順に実行
-          (move "<" (first (reverse shards)) (rest (reverse shards))  (fn [dest source] (:hashvalue source))  ))))
+          (move "<" (first (reverse shards)) (rest (reverse shards))  (fn [d s] (:hashvalue s))
+            (fn [sources] sources)))))
 
 ;削除処理
+;他の全てのノードから削除対象のノード野範囲を鳥にくる
+;あまった値は最大値を管理するノードに突っ込む
 (defn release [groupname url user]
   (transaction
     (let [group (first (select groups (where {:name groupname})))
@@ -147,7 +157,7 @@
       (if (or (empty? group) (>= 1 (count groupshards)))
         (throw (IllegalStateException. "can' remove because this is last one"))
         (if (empty? nearlestLess)
-          ;一つ前のものがなければ、1個上のものに全件移動     TODO
+          ;一つ前のものがなければ、1個上のものに全件移動
           (let [nearlestBigger (first (select shards (where (and (= :groupname groupname) (> :hashvalue (:hashvalue current)))) (order :hashvalue :ASC) (limit 1) ))
                 biggerdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url nearlestBigger)
                             :user (:user nearlestBigger) :password (:password nearlestBigger)}]
