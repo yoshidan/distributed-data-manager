@@ -15,9 +15,17 @@
                               :info  (session/flash-get :info) :error (session/flash-get :error)}))
 
 (defn init-group [url username password dialect tables virtualcounts hashfunctions keycolumns]
-  (apply list (map #(dbcore/init-group %1 url username password %3 dialect %2 %4)
-      (str/split tables #"\s+") (str/split virtualcounts #"\s+") (str/split hashfunctions #"\s+") (str/split keycolumns #"\s+")))
-  (noir/redirect (str "/group?groupname=" (first (str/split tables #"\s+")) )))
+  (try
+    (do
+      (apply list (map #(dbcore/init-group %1 url username password %3 dialect %2 %4)
+        (str/split tables #"\s+") (str/split virtualcounts #"\s+") (str/split hashfunctions #"\s+") (str/split keycolumns #"\s+")))
+        (noir/redirect (str "/group?groupname=" (first (str/split tables #"\s+")) )))
+    (catch Exception e
+      (do
+        (.printStackTrace e)
+        (layout/render "search.html" { :error (str "Init Error : " (.getMessage e))
+                   :result (dbcore/search url username password dialect)
+                   :url url :username username :password password :dialect dialect})))))
 
 (defn search [url username password dialect]
   (layout/render "search.html" {

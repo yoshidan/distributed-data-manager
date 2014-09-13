@@ -1,5 +1,8 @@
 {% extends "templates/base.html" %}
 {% block content %}
+{% if error %}
+    <div class="alert alert-danger" role="alert">{{error}}</div>
+{% endif %}
 <legend>Database</legend>
 <form class="well navbar-form navbar-left" action="/search" method="POST" style="width:100%">
     <div class="form-group" style="width:100%">
