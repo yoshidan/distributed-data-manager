@@ -79,6 +79,13 @@
                     </form>
                 </td>
             </tr>
+            {% for virtual in item.virtuals %}
+            <tr>
+                <td></td>
+                <td></td>
+                <td>{{virtual.hashvalue}}</td>
+            </tr>
+            {% endfor %}
             {% endfor %}
             </tbody>
         </table>

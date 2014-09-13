@@ -17,20 +17,17 @@
   []
   (.exists (new java.io.File (str (io/resource-path) db-store ".mv.db"))))
 
-(defn create-users-table
+(defn create-virtualshards-table
   []
   (sql/db-do-commands
     db-spec
+    (sql/drop-table-ddl :virtualshards)
     (sql/create-table-ddl
-      :users
-      [:id "varchar(20) PRIMARY KEY"]
-      [:first_name "varchar(30)"]
-      [:last_name "varchar(30)"]
-      [:email "varchar(30)"]
-      [:admin :boolean]
-      [:last_login :time]
-      [:is_active :boolean]
-      [:pass "varchar(100)"])))
+      :virtualshards
+      [:id  "varchar(20) PRIMARY KEY AUTO_INCREMENT"]
+      [:shardid "varchar(20)"]
+      [:virtualname "varchar(64)"]
+      [:hashvalue "varchar(30)"])))
 
 (defn create-groups-table
   []
@@ -64,4 +61,5 @@
   "creates the database tables used by the application"
   []
   (create-groups-table)
-  (create-shards-table))
+  (create-shards-table)
+  (create-virtualshards-table))

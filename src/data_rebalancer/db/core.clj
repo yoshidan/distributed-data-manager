@@ -8,6 +8,7 @@
 (defdb db schema/db-spec)
 (defentity groups)
 (defentity shards)
+(defentity virtualshards)
 
 ;シャード構成済みか確認
 (defn get-group [groupname]
@@ -16,14 +17,32 @@
            (limit 1))))
 
 ;ノードのハッシュ値を取得する
-(defn get-hash [dialect url user password hashfunction]
+(defn- get-hash [dialect url user password hashfunction seed]
   (let [database {:classname "oracle.jdbc.OracleDriver"
                   :subprotocol dialect
                   :subname url
                   :user user
                   :password password}]
-    (->> (str "SELECT " (format hashfunction (str "'" user "'")) " AS hashvalue " "FROM DUAL")
+    (->> (str "SELECT " (format hashfunction (str "'" seed "'")) " AS hashvalue " "FROM DUAL")
       (sql/query database) (first) (:hashvalue))))
+
+;構成にシャードを追加する
+(defn add-shard [groupname url username password]
+  (if (empty? (select shards (where {:groupname groupname :url url :user username})))
+    (do
+      (let [group (get-group groupname)]
+        (transaction
+          (insert shards (values [{:groupname groupname :url url :user username :password password
+                                   :hashvalue (get-hash (:database group) url username password
+                                                (:hashfunction group) (str url username))}]))
+          ;virtual shards
+          (let [shardid (:id (first (select shards (where {:groupname groupname :url url :user username}))))]
+            (doall (for [x (range (:virtualcount group))]
+              (insert virtualshards
+                (values [ {:shardid shardid :virtualname (str url username x)
+                           :hashvalue (get-hash (:database group) url username password
+                                        (:hashfunction group) (str url username x))}]))))))))
+    (throw (IllegalStateException. "already exists"))) )
 
 ; グループを初期化する
 (defn init-group [groupname url user password hashfunction database virtualcount keycolumn]
@@ -31,13 +50,13 @@
     (insert groups
       (values [
               {:name groupname :hashfunction hashfunction :database database :virtualcount virtualcount :keycolumn keycolumn}]))
-    (insert shards
-      (values [ {:groupname groupname :url url :user user :password password :hashvalue (get-hash database url user password hashfunction) } ]))))
+    (add-shard groupname url user password)))
 
 ;構成済みのシャード一覧を取得する
 (defn search-shards [groupname]
-  (letfn [(get-count [shard]
-    (let [ group (get-group groupname)
+  (letfn
+    [(merge-count [shard]
+      (let [ group (get-group groupname)
            database {:classname "oracle.jdbc.OracleDriver"
                             :subprotocol (:database group)
                             :subname (:url shard)
@@ -45,8 +64,10 @@
                             :password (:password shard)}
            query (format "select count(*) as cnt , max(%s) as mx, min(%s) as mn from %s"
                    (format (:hashfunction group) (:keycolumn group)) (format (:hashfunction group) (:keycolumn group)) groupname)]
-      (->>  (sql/query database query) (first) (merge shard))))]
-    (->> (select shards (where {:groupname groupname}) (order :hashvalue :DESC) ) (map get-count))))
+         (->>  (sql/query database query) (first) (merge shard))))
+     (merge-virtual [shard]
+       (merge shard {:virtuals (select virtualshards (where {:shardid (:id shard)}))}))]
+    (->> (select shards (where {:groupname groupname}) (order :hashvalue :DESC) ) (map merge-count) (map merge-virtual))))
 
   ;指定されたデータソースの検索処理、とりあえずOracleのみ対応
 (defn search [url username password dialect]
@@ -71,13 +92,6 @@
                   (if (empty? g)
                       (array-map :group g :table t :columns (get-columns t))
                       (array-map :group g :table t :shards (get-shards t)))))))))))
-
-;構成にシャードを追加する
-(defn add-shard [groupname url username password]
-  (if (empty? (select shards (where {:groupname groupname :url url :user username})))
-    (insert shards (values [{:groupname groupname :url url :user username :password password
-                             :hashvalue (get-hash (:database (get-group groupname)) url username password (:hashfunction (get-group groupname)))}]))
-    (throw (IllegalStateException. "already exists"))) )
 
 ;sourceからdestにレコードを移動する
 (defn- move-record [group direction destdb sourcedb hash]
@@ -134,7 +148,7 @@
         (throw (IllegalStateException. "can' remove because this is last one"))
         (if (empty? nearlestLess)
           ;一つ前のものがなければ、1個上のものに全件移動     TODO
-          (let [nearlestBigger  (first (select shards (where (and (= :groupname groupname) (> :hashvalue (:hashvalue current)))) (order :hashvalue :ASC) (limit 1) ))
+          (let [nearlestBigger (first (select shards (where (and (= :groupname groupname) (> :hashvalue (:hashvalue current)))) (order :hashvalue :ASC) (limit 1) ))
                 biggerdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url nearlestBigger)
                             :user (:user nearlestBigger) :password (:password nearlestBigger)}]
               (move-record group ">=" biggerdb sourcedb 0))
