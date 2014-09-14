@@ -1,4 +1,4 @@
-(ns data-rebalancer.db.schema
+(ns ddman.db.schema
   (:require [clojure.java.jdbc :as sql]
             [noir.io :as io]))
 

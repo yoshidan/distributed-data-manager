@@ -1,11 +1,11 @@
-(ns data-rebalancer.routes.home
+(ns ddman.routes.home
   (:require [compojure.core :refer :all]
             [clojure.string :as str]
             [noir.response :as noir]
             [noir.session :as session]
-            [data-rebalancer.layout :as layout]
-            [data-rebalancer.db.core :as dbcore]
-            [data-rebalancer.util :as util]))
+            [ddman.layout :as layout]
+            [ddman.db.core :as dbcore]
+            [ddman.util :as util]))
 
 (defn search-page []
   (layout/render "search.html" {:url "thin:@192.168.33.22:1521:XE"} ))

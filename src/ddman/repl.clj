@@ -1,5 +1,5 @@
-(ns data-rebalancer.repl
-  (:use data-rebalancer.handler
+(ns ddman.repl
+  (:use ddman.handler
         ring.server.standalone
         [ring.middleware file-info file]))
 

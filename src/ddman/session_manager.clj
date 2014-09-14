@@ -1,4 +1,4 @@
-(ns data-rebalancer.session-manager
+(ns ddman.session-manager
   (:require [noir.session :refer [mem]]
             [cronj.core :refer [cronj]]))
 

@@ -1,4 +1,4 @@
-# data-rebalancer
+# ddman
 
 FIXME
 

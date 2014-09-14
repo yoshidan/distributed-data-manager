@@ -1,8 +1,8 @@
-(ns data-rebalancer.db.core
+(ns ddman.db.core
   (:import [java.sql Connection DriverManager PreparedStatement Statement])
   (:use korma.core
         [korma.db :only (defdb transaction)])
-  (:require [data-rebalancer.db.schema :as schema]
+  (:require [ddman.db.schema :as schema]
             [clojure.java.jdbc :as sql]))
 
 (defdb db schema/db-spec)
@@ -19,6 +19,15 @@
                   :password password}]
     (->> (str "SELECT " (format hashfunction (str "'" seed "'")) " AS hashvalue " "FROM DUAL")
       (sql/query database) (first) (:hashvalue))))
+
+;物理シャードと仮想シャードを併せて昇順にする
+(defn- asc-shards [groupname]
+  (sort-by :hashvalue
+    (apply concat
+      (for [shard (select shards (where {:groupname groupname}))]
+        (cons shard
+          (for [v (select virtualshards (where {:shardid (:id shard)}))]
+            {:hashvalue (:hashvalue v) :url (:url shard) :user (:user shard ) :password (:password shard)}))))))
 
 
 ;シャード構成済みか確認
@@ -97,15 +106,6 @@
                   (if (empty? g)
                       (array-map :group g :table t :columns (get-columns t))
                       (array-map :group g :table t :shards (get-shards t)))))))))))
-
-;物理シャードと仮想シャードを併せて昇順にする
-(defn- asc-shards [groupname]
-  (sort-by :hashvalue
-    (apply concat
-      (for [shard (select shards (where {:groupname groupname}))]
-          (cons shard
-            (for [v (select virtualshards (where {:shardid (:id shard)}))]
-                {:hashvalue (:hashvalue v) :url (:url shard) :user (:user shard ) :password (:password shard)}))))))
 
 ;レコード移動
 (defn- move [group source dest sourcedb destdb r]

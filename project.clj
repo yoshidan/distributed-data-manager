@@ -1,12 +1,12 @@
 (defproject
-  data-rebalancer
+  ddman
   "0.1.0-SNAPSHOT"
   :description
   "FIXME: write description"
   :ring
-  {:handler data-rebalancer.handler/app,
-   :init data-rebalancer.handler/init,
-   :destroy data-rebalancer.handler/destroy}
+  {:handler ddman.handler/app,
+   :init ddman.handler/init,
+   :destroy ddman.handler/destroy}
   :plugins
   [[lein-ring "0.8.10"] [lein-environ "0.5.0"]]
   :url
@@ -49,5 +49,5 @@
    [com.taoensso/tower "2.0.2"]
    [com.oracle/ojdbc6 "11.1.0.7"]]
   :repl-options
-  {:init-ns data-rebalancer.repl}
+  {:init-ns ddman.repl}
   :min-lein-version "2.0.0")

@@ -1,4 +1,4 @@
-(ns data-rebalancer.layout
+(ns ddman.layout
   (:require [selmer.parser :as parser]
             [clojure.string :as s]
             [ring.util.response :refer [content-type response]]

@@ -1,4 +1,4 @@
-(ns data-rebalancer.middleware
+(ns ddman.middleware
   (:require [taoensso.timbre :as timbre]
             [selmer.parser :as parser]
             [environ.core :refer [env]]

@@ -1,8 +1,8 @@
-(ns data-rebalancer.handler
+(ns ddman.handler
   (:require [compojure.core :refer [defroutes]]
-            [data-rebalancer.routes.home :refer [home-routes]]
-            [data-rebalancer.middleware :refer [load-middleware]]
-            [data-rebalancer.session-manager :as session-manager]
+            [ddman.routes.home :refer [home-routes]]
+            [ddman.middleware :refer [load-middleware]]
+            [ddman.session-manager :as session-manager]
             [noir.response :refer [redirect]]
             [noir.util.middleware :refer [app-handler]]
             [compojure.route :as route]
@@ -11,7 +11,7 @@
             [selmer.parser :as parser]
             [environ.core :refer [env]]
             [cronj.core :as cronj]
-            [data-rebalancer.db.schema :as schema]))
+            [ddman.db.schema :as schema]))
 
 (defroutes base-routes
   (route/resources "/")
@@ -38,7 +38,7 @@
   (if (env :dev) (parser/cache-off!))
   ;;start the expired session cleanup job
   (cronj/start! session-manager/cleanup-job)
-  (timbre/info "data-rebalancer started successfully"))
+  (timbre/info "ddman started successfully"))
 
   (schema/initialized?) (schema/create-tables)
 
@@ -46,7 +46,7 @@
   "destroy will be called when your application
    shuts down, put any clean up code here"
   []
-  (timbre/info "data-rebalancer is shutting down...")
+  (timbre/info "ddman is shutting down...")
   (cronj/shutdown! session-manager/cleanup-job)
   (timbre/info "shutdown complete!"))
 

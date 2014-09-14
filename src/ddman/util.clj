@@ -1,4 +1,4 @@
-(ns data-rebalancer.util
+(ns ddman.util
   (:require [noir.io :as io]
             [markdown.core :as md]))
 
