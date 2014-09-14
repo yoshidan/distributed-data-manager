@@ -12,6 +12,7 @@
 
 (defn group-page [groupname]
   (layout/render "group.html" {:group (dbcore/get-group groupname) :shards (dbcore/search-shards groupname)
+                              :pshards (dbcore/search-physical-shards groupname)
                               :info  (session/flash-get :info) :error (session/flash-get :error)}))
 
 (defn init-group [url username password dialect tables virtualcounts hashfunctions keycolumns]

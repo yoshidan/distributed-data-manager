@@ -54,29 +54,33 @@
     (add-shard groupname url user password)))
 
 ;構成済みのシャード一覧を取得する
-(defn search-shards [groupname]
+(defn search-physical-shards [groupname]
   (letfn
     [(merge-count [shard]
       (let [ group (get-group groupname)
-           database {:classname "oracle.jdbc.OracleDriver"
-                            :subprotocol (:database group)
-                            :subname (:url shard)
-                            :user (:user shard)
-                            :password (:password shard)}
-           query (format "select count(*) as cnt , max(%s) as mx, min(%s) as mn from %s"
-                   (format (:hashfunction group) (:keycolumn group)) (format (:hashfunction group) (:keycolumn group)) groupname)]
-         (->>  (sql/query database query) (first) (merge shard))))
-     (merge-virtual [shard]
-       (merge shard {:virtuals (select virtualshards (where {:shardid (:id shard)}))}))]
-    (->> (select shards (where {:groupname groupname}) (order :hashvalue :DESC) ) (map merge-count) (map merge-virtual))))
+             database {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url shard) :user (:user shard) :password (:password shard)}
+             query (format "select count(*) as cnt from %s" groupname)]
+         (->>  (sql/query database query) (first) (merge shard))))]
+    (->> (select shards (where {:groupname groupname}) (order :hashvalue :DESC) ) (map merge-count))))
+
+(defn search-shards [groupname]
+  (let [ shards-asc (asc-shards groupname)
+         betweens (map #(list %1 %2) shards-asc (conj (into [] (rest shards-asc)) (first shards-asc)))]
+    (letfn [(merge-count [betweens]
+        (let [shard (first betweens)
+              dest (second betweens)
+              group (get-group groupname)
+              hc (format (:hashfunction group) (:keycolumn group))
+              database {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url shard) :user (:user shard) :password (:password shard)}
+              query (if (> (Integer/parseInt (:hashvalue shard)) (Integer/parseInt (:hashvalue dest)))
+                      (format "select count(*) as cnt , max(%s) as mx, min(%s) as mn from %s where %s >= ? or %s < ?" hc hc groupname hc hc)
+                      (format "select count(*) as cnt , max(%s) as mx, min(%s) as mn from %s where %s between ? and ?" hc hc groupname hc))]
+            (->> (sql/query database [query (:hashvalue shard) (:hashvalue dest)]) (first) (merge shard) (merge shard {:physical (empty? (:groupanme shard)) :limithashvalue (:hashvalue dest)}) )))]
+      (map merge-count betweens))))
 
 ;指定されたデータソースの検索処理、とりあえずOracleのみ対応
 (defn search [url username password dialect]
-  (let [database {:classname "oracle.jdbc.OracleDriver"
-                  :subprotocol dialect
-                  :subname url
-                  :user username
-                  :password password}]
+  (let [database {:classname "oracle.jdbc.OracleDriver" :subprotocol dialect :subname url :user username :password password}]
       (letfn [(get-columns [tablename]
                 (->> (sql/query database ["SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?" tablename] )
                     ;現実化しないと先頭1件のカラムしか拾えない

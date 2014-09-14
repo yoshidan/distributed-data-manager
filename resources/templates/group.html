@@ -9,10 +9,10 @@
         <div class="alert alert-danger" role="alert">{{error}}</div>
     {% endif %}
 
-    <legend>Group</legend>
+    <legend>Table</legend>
     <form action="/group" method="POST">
         <div class="control-group navbar-left" style="margin-right:10px">
-            <label class="control-label" for="name">Table</label>
+            <label class="control-label" for="name">Name</label>
             <div class="controls">
                 <input value="{{group.name}}" id="name" disabled type="text" name="name" required class="form-control" style="width:200px">
             </div>
@@ -44,21 +44,20 @@
         <br/>
     </form>
     <br/>
-    <legend>Shards</legend>
+    <legend>Sharding</legend>
     <div class="panel panel-default">
-        <div class="panel-heading">Sharded Tables</div>
+        <div class="panel-heading">Virtual Shard</div>
         <table class="table table-hover table-condensed">
             <thead>
             <tr>
                 <th rowspan="2">URL</th>
                 <th rowspan="2">Schema</th>
                 <th rowspan="2">Managing Hash</th>
-                <th colspan="4">Status</th>
+                <th colspan="3">Status</th>
             </tr>
                 <th>Count</th>
-                <th>Max</th>
                 <th>Min</th>
-                <th>Operation</th>
+                <th>Max</th>
             </tr>
             </thead>
             <tbody>
@@ -66,18 +65,10 @@
             <tr>
                 <td>{{item.url}}</td>
                 <td>{{item.user}}</td>
-                <td>{{item.hashvalue}}</td>
+                <td>{{item.hashvalue}} - {{item.limithashvalue}}</td>
                 <td>{{item.cnt}}</td>
-                <td>{{item.mx}}</td>
                 <td>{{item.mn}}</td>
-                <td>
-                    <form method="POST" action="/release">
-                        <input type="hidden" name="groupname" value="{{group.name}}">
-                        <input type="hidden" name="url" value="{{item.url}}">
-                        <input type="hidden" name="user" value="{{item.user}}">
-                        <button class="btn-xs btn btn-danger" type="submit">RELEASE</button>
-                    </form>
-                </td>
+                <td>{{item.mx}}</td>
             </tr>
             {% for virtual in item.virtuals %}
             <tr>
@@ -89,6 +80,37 @@
             {% endfor %}
             </tbody>
         </table>
+    </div>
+    <div class="panel panel-default">
+        <div class="panel-heading">Physical Shard</div>
+        <table class="table table-hover table-condensed">
+            <thead>
+                <tr>
+                    <th>URL</th>
+                    <th>Schema</th>
+                    <th>Count</th>
+                    <th>Operation</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for item in pshards %}
+            <tr>
+                <td>{{item.url}}</td>
+                <td>{{item.user}}</td>
+                <td>{{item.cnt}}</td>
+                <td>
+                    <form method="POST" action="/release">
+                        <input type="hidden" name="groupname" value="{{group.name}}">
+                        <input type="hidden" name="url" value="{{item.url}}">
+                        <input type="hidden" name="user" value="{{item.user}}">
+                        <button class="btn-xs btn btn-danger" type="submit">RELEASE</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </table>
     </div>
     <form class="well navbar-form navbar-left" action="/shard" method="POST" style="width:100%">
         <div class="form-group" style="width:100%">
