@@ -122,14 +122,14 @@
         ;抽出もとから抜いて自分に一括登録
         (with-open [rseq (.executeQuery sourcestmt)]
           (transaction
-            ;ここは現実化しないと大変なことになる
+            ;ここは現実化しないと先頭1回しか実行しない
             (doall (for [splited (partition-all 10000 (resultset-seq rseq))]
                      (apply sql/db-do-prepared destdb
                        (format "INSERT INTO %s VALUES (%s)" groupname
                          (clojure.string/join ", " (repeat (.getColumnCount (.getMetaData rseq)) "?" )))
                        (for [row splited] (vals row)))))))
-        ;元データの消し込み
-         (sql/execute! sourcedb [deletequery (:hashvalue (first r)) (:hashvalue (second r))]))))
+        ;元データの消し込み(なぜか削除件数はPersistentListが返却されるためfirstで先頭取得する）
+        (first (sql/execute! sourcedb [deletequery (:hashvalue (first r)) (:hashvalue (second r))])))))
 
 ;リバランス処理
 (defn rebalance [groupname]
@@ -143,7 +143,8 @@
           (let [
             sourcedb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url source) :user (:user source) :password (:password source)}
             destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}]
-            (when-not (= destdb sourcedb)
+            (if (= destdb sourcedb)
+              0
               (move group source dest sourcedb destdb r))))))))))
 
 ;削除処理
@@ -165,8 +166,8 @@
           ;削除したデータの入れ先達
           (let [shardsAsc (asc-shards groupname)
                 betweens (map #(list %1 %2) shardsAsc (conj (into [] (rest shardsAsc)) (first shardsAsc)))]
-            (for [r betweens]
+            (apply + (for [r betweens]
                (let [dest (first r)
                      destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}]
-                 (move group current dest sourcedb destdb r)))))))))
+                 (move group current dest sourcedb destdb r))))))))))
 

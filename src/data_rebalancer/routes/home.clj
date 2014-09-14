@@ -47,16 +47,16 @@
 ;リバランス処理
 (defn rebalance [groupname]
   (try
-    (session/flash-put! :info (str "Rebalance Complete : " (dbcore/rebalance groupname)))
+    (session/flash-put! :info (str "Rebalance Complete : " (dbcore/rebalance groupname) " moved"))
     (catch Exception e
         (.printStackTrace e)
-        (session/flash-put! :error (str "Release Error : " (.getMessage e) ))))
+        (session/flash-put! :error (str "Rebalance Error : " (.getMessage e) ))))
   (noir/redirect (str "/group?groupname=" groupname )))
 
 ;リリース処理
 (defn release [groupname url user]
   (try
-    (session/flash-put! :info (str "Release Complete" (dbcore/release groupname url user)))
+    (session/flash-put! :info (str "Release Complete : " (dbcore/release groupname url user) " moved"))
     (catch Exception e
       (.printStackTrace e)
       (session/flash-put! :error (str "Release Error : " (.getMessage e) ))))
