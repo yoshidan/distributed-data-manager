@@ -47,7 +47,7 @@
 ;リバランス処理
 (defn rebalance [groupname]
   (try
-    (session/flash-put! :info (str "Rebalance Complete" (dbcore/rebalance groupname)))
+    (session/flash-put! :info (str "Rebalance Complete : " (dbcore/rebalance groupname)))
     (catch Exception e
         (.printStackTrace e)
         (session/flash-put! :error (str "Release Error : " (.getMessage e) ))))

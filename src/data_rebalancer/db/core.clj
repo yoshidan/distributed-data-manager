@@ -10,12 +10,6 @@
 (defentity shards)
 (defentity virtualshards)
 
-;シャード構成済みか確認
-(defn get-group [groupname]
-  (first (select groups
-           (where {:name groupname})
-           (limit 1))))
-
 ;ノードのハッシュ値を取得する
 (defn- get-hash [dialect url user password hashfunction seed]
   (let [database {:classname "oracle.jdbc.OracleDriver"
@@ -25,6 +19,13 @@
                   :password password}]
     (->> (str "SELECT " (format hashfunction (str "'" seed "'")) " AS hashvalue " "FROM DUAL")
       (sql/query database) (first) (:hashvalue))))
+
+
+;シャード構成済みか確認
+(defn get-group [groupname]
+  (first (select groups
+           (where {:name groupname})
+           (limit 1))))
 
 ;構成にシャードを追加する
 (defn add-shard [groupname url username password]
@@ -69,7 +70,7 @@
        (merge shard {:virtuals (select virtualshards (where {:shardid (:id shard)}))}))]
     (->> (select shards (where {:groupname groupname}) (order :hashvalue :DESC) ) (map merge-count) (map merge-virtual))))
 
-  ;指定されたデータソースの検索処理、とりあえずOracleのみ対応
+;指定されたデータソースの検索処理、とりあえずOracleのみ対応
 (defn search [url username password dialect]
   (let [database {:classname "oracle.jdbc.OracleDriver"
                   :subprotocol dialect
@@ -93,79 +94,60 @@
                       (array-map :group g :table t :columns (get-columns t))
                       (array-map :group g :table t :shards (get-shards t)))))))))))
 
-;sourceからdestにレコードを移動する
-(defn- move-record [group direction dest source hash]
-   (let [groupname (:name group)
-         sourcedb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url source) :user (:user source) :password (:password source)}
-         destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}
-         hashcolumn (format (:hashfunction group) (:keycolumn group))
-         selectquery (format "SELECT * FROM %s WHERE %s %s ? " groupname hashcolumn direction)]
-     (when-not (= destdb sourcedb)
-       (with-open [sourcecon (sql/get-connection sourcedb)
-                   sourcestmt (sql/prepare-statement sourcecon selectquery)]
-         (.setFetchSize sourcestmt 1000)
-         (.setObject sourcestmt 1 hash)
-         (println (:subname sourcedb) "/" (:user sourcedb) "/" (:hashvalue source)  " = " selectquery ":" hash "->" (:subname destdb) "/" (:user destdb) "/" (:hashvalue dest) )
-         ;抽出もとから抜いて自分に一括登録
-         (with-open [rseq (.executeQuery sourcestmt)]
-           (transaction
-             ;ここは現実化しないと大変なことになる
-             (doall (for [splited (partition-all 10000 (resultset-seq rseq))]
-                (apply sql/db-do-prepared destdb
-                    (format "INSERT INTO %s VALUES (%s)" groupname
-                      (clojure.string/join ", " (repeat (.getColumnCount (.getMetaData rseq)) "?" )))
-                    (for [row splited] (vals row)))))))
-         ;元データの消し込み
-         (sql/execute! sourcedb
-           [(format "DELETE FROM %s WHERE %s %s ? " groupname hashcolumn direction) hash])))))
+;物理シャードと仮想シャードを併せて昇順にする
+(defn- asc-shards [groupname]
+  (sort-by :hashvalue
+    (apply concat
+      (for [shard (select shards (where {:groupname groupname}))]
+          (cons shard
+            (for [v (select virtualshards (where {:shardid (:id shard)}))]
+                {:hashvalue (:hashvalue v) :url (:url shard) :user (:user shard ) :password (:password shard)}))))))
 
+;レコード移動
+(defn- move [group source dest sourcedb destdb r]
+  (let [groupname (:name group)
+        hashcolumn (format (:hashfunction group) (:keycolumn group))
+        selectquery (if (> (Integer/parseInt (:hashvalue (first r))) (Integer/parseInt (:hashvalue (second r))))
+                        (format "SELECT * FROM %s WHERE %s >= ? OR %s < ? " groupname hashcolumn hashcolumn)
+                        (format "SELECT * FROM %s WHERE %s BETWEEN ? AND ? " groupname hashcolumn))
+        deletequery (if (> (Integer/parseInt (:hashvalue (first r))) (Integer/parseInt (:hashvalue (second r))))
+                       (format "DELETE FROM %s WHERE %s >= ? OR %s < ? " groupname hashcolumn hashcolumn)
+                       (format "DELETE FROM %s WHERE %s BETWEEN ? AND ? " groupname hashcolumn))]
+      (with-open [sourcecon (sql/get-connection sourcedb)
+                  sourcestmt (sql/prepare-statement sourcecon selectquery)]
+        (.setFetchSize sourcestmt 1000)
+        (.setObject sourcestmt 1 (:hashvalue (first r)))
+        (.setObject sourcestmt 2 (:hashvalue (second r)))
+        (println (:subname sourcedb) "/" (:user sourcedb) "/" (:hashvalue source)  " = " selectquery (:hashvalue (first r)) (:hashvalue (second r)) "->" (:subname destdb) "/" (:user destdb) "/" (:hashvalue dest) )
+        ;抽出もとから抜いて自分に一括登録
+        (with-open [rseq (.executeQuery sourcestmt)]
+          (transaction
+            ;ここは現実化しないと大変なことになる
+            (doall (for [splited (partition-all 10000 (resultset-seq rseq))]
+                     (apply sql/db-do-prepared destdb
+                       (format "INSERT INTO %s VALUES (%s)" groupname
+                         (clojure.string/join ", " (repeat (.getColumnCount (.getMetaData rseq)) "?" )))
+                       (for [row splited] (vals row)))))))
+        ;元データの消し込み
+         (sql/execute! sourcedb [deletequery (:hashvalue (first r)) (:hashvalue (second r))]))))
 
+;リバランス処理
 (defn rebalance [groupname]
   (let [group (first (select groups (where {:name groupname})))
-        pshards (select shards (where {:groupname groupname}))
-        shardsAsc (sort-by :hashvalue
-                  (apply concat (for [shard pshards]
-                    (cons shard (for [v (select virtualshards (where {:shardid (:id shard)}))]
-                        {:hashvalue (:hashvalue v) :url (:url shard) :user (:user shard ) :password (:password shard)})))))
+        shardsAsc (asc-shards groupname)
         betweens (map #(list %1 %2) shardsAsc (conj (into [] (rest shardsAsc)) (first shardsAsc)))]
-
-    (for [r betweens]
+    (apply + (for [r betweens]
       (let [dest (first r)]
         ;投入先以外のノードから管理対象の値を引っこ抜く
-        (for [source (filter #(and (not (empty? (:groupname %))) (not (= % dest))) shardsAsc) ]
+        (apply + (for [source (filter #(and (not (empty? (:groupname %))) (not (= % dest))) shardsAsc) ]
           (let [
             sourcedb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url source) :user (:user source) :password (:password source)}
-            destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}
-            hashcolumn (format (:hashfunction group) (:keycolumn group))
-            selectquery (if (> (Integer/parseInt (:hashvalue (first r))) (Integer/parseInt (:hashvalue (second r))))
-                (format "SELECT * FROM %s WHERE %s >= ? OR %s < ? " groupname hashcolumn hashcolumn)
-                (format "SELECT * FROM %s WHERE %s BETWEEN ? AND ? " groupname hashcolumn))
-            deletequery (if (> (Integer/parseInt (:hashvalue (first r))) (Integer/parseInt (:hashvalue (second r))))
-                (format "DELETE FROM %s WHERE %s >= ? OR %s < ? " groupname hashcolumn hashcolumn)
-                (format "DELETE FROM %s WHERE %s BETWEEN ? AND ? " groupname hashcolumn))
-            ]
+            destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}]
             (when-not (= destdb sourcedb)
-              (with-open [sourcecon (sql/get-connection sourcedb)
-                          sourcestmt (sql/prepare-statement sourcecon selectquery)]
-                (.setFetchSize sourcestmt 1000)
-                (.setObject sourcestmt 1 (:hashvalue (first r)))
-                (.setObject sourcestmt 2 (:hashvalue (second r)))
-                (println (:subname sourcedb) "/" (:user sourcedb) "/" (:hashvalue source)  " = " selectquery (:hashvalue (first r)) (:hashvalue (second r)) "->" (:subname destdb) "/" (:user destdb) "/" (:hashvalue dest) )
-                ;抽出もとから抜いて自分に一括登録
-                (with-open [rseq (.executeQuery sourcestmt)]
-                  (transaction
-                    ;ここは現実化しないと大変なことになる
-                    (doall (for [splited (partition-all 10000 (resultset-seq rseq))]
-                             (apply sql/db-do-prepared destdb
-                               (format "INSERT INTO %s VALUES (%s)" groupname
-                                 (clojure.string/join ", " (repeat (.getColumnCount (.getMetaData rseq)) "?" )))
-                               (for [row splited] (vals row)))))))
-                ;元データの消し込み
-                (sql/execute! sourcedb [deletequery (:hashvalue (first r)) (:hashvalue (second r))])))))))))
+              (move group source dest sourcedb destdb r))))))))))
 
-;削除処理 TODO
-;他の全てのノードから削除対象のノード野範囲を鳥にくる
-;あまった値は最大値を管理するノードに突っ込む
+;削除処理
+;他の全てのノードから削除対象のノード野範囲を取得しにくる
 (defn release [groupname url user]
   (transaction
     (let [group (first (select groups (where {:name groupname})))
@@ -181,38 +163,10 @@
           (delete shards (where {:id (:id current)}))
 
           ;削除したデータの入れ先達
-          (let
-            [pshards (select shards (where {:groupname groupname}))
-             shardsAsc (sort-by :hashvalue (apply concat (for [shard pshards]
-                                                           (cons shard (for [v (select virtualshards (where {:shardid (:id shard)}))]
-                                                                         {:hashvalue (:hashvalue v) :url (:url shard) :user (:user shard) :password (:password shard)})))))
-             betweens (map #(list %1 %2) shardsAsc (conj (into [] (rest shardsAsc)) (first shardsAsc)))]
-             (for [r betweens]
+          (let [shardsAsc (asc-shards groupname)
+                betweens (map #(list %1 %2) shardsAsc (conj (into [] (rest shardsAsc)) (first shardsAsc)))]
+            (for [r betweens]
                (let [dest (first r)
-                     destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}
-                     hashcolumn (format (:hashfunction group) (:keycolumn group))
-                     selectquery (if (> (Integer/parseInt (:hashvalue (first r))) (Integer/parseInt (:hashvalue (second r))))
-                                   (format "SELECT * FROM %s WHERE %s >= ? OR %s < ? " groupname hashcolumn hashcolumn)
-                                   (format "SELECT * FROM %s WHERE %s BETWEEN ? AND ? " groupname hashcolumn))
-                     deletequery (if (> (Integer/parseInt (:hashvalue (first r))) (Integer/parseInt (:hashvalue (second r))))
-                                   (format "DELETE FROM %s WHERE %s >= ? OR %s < ? " groupname hashcolumn hashcolumn)
-                                   (format "DELETE FROM %s WHERE %s BETWEEN ? AND ? " groupname hashcolumn))]
-                   (with-open [sourcecon (sql/get-connection sourcedb)
-                               sourcestmt (sql/prepare-statement sourcecon selectquery)]
-                     (.setFetchSize sourcestmt 1000)
-                     (.setObject sourcestmt 1 (:hashvalue (first r)))
-                     (.setObject sourcestmt 2 (:hashvalue (second r)))
-                     (println (:subname sourcedb) "/" (:user sourcedb) "/" (:hashvalue current)  " = " selectquery (:hashvalue (first r)) (:hashvalue (second r)) "->" (:subname destdb) "/" (:user destdb) "/" (:hashvalue dest) )
-                     ;抽出もとから抜いて自分に一括登録
-                     (with-open [rseq (.executeQuery sourcestmt)]
-                       (transaction
-                         ;ここは現実化しないと大変なことになる
-                         (doall (for [splited (partition-all 10000 (resultset-seq rseq))]
-                                  (apply sql/db-do-prepared destdb
-                                    (format "INSERT INTO %s VALUES (%s)" groupname
-                                      (clojure.string/join ", " (repeat (.getColumnCount (.getMetaData rseq)) "?" )))
-                                    (for [row splited] (vals row)))))))
-                     ;元データの消し込み
-                     (sql/execute! sourcedb [deletequery (:hashvalue (first r)) (:hashvalue (second r))]))))))))))
-
+                     destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}]
+                 (move group current dest sourcedb destdb r)))))))))
 
