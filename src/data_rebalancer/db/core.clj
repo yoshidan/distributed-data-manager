@@ -133,7 +133,6 @@
       (let [dest (first r)]
         ;投入先以外のノードから管理対象の値を引っこ抜く
         (for [source (filter #(and (not (empty? (:groupname %))) (not (= % dest))) shardsAsc) ]
-
           (let [
             sourcedb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url source) :user (:user source) :password (:password source)}
             destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}
@@ -172,21 +171,48 @@
     (let [group (first (select groups (where {:name groupname})))
           groupshards (select shards (where {:groupname groupname}))
           current (first (select shards (where {:groupname groupname :url url :user user})))
-          sourcedb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url current)
-                    :user (:user current) :password (:password current)}
-          nearlestLess (first (select shards (where (and (= :groupname groupname) (< :hashvalue (:hashvalue current)))) (order :hashvalue :DESC) (limit 1) ))]
+          sourcedb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url current) :user (:user current) :password (:password current)}]
+
       (if (or (empty? group) (>= 1 (count groupshards)))
         (throw (IllegalStateException. "can' remove because this is last one"))
-        (if (empty? nearlestLess)
-          ;一つ前のものがなければ、1個上のものに全件移動
-          (let [nearlestBigger (first (select shards (where (and (= :groupname groupname) (> :hashvalue (:hashvalue current)))) (order :hashvalue :ASC) (limit 1) ))
-                biggerdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url nearlestBigger)
-                            :user (:user nearlestBigger) :password (:password nearlestBigger)}]
-              (move-record group ">=" biggerdb sourcedb 0))
-          ;現在のノードのレコードを一つhashが小さい前のノードに全件移動する
-          (let [leastdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url nearlestLess)
-                           :user (:user nearlestLess) :password (:password nearlestLess)}]
-              (move-record group ">=" leastdb sourcedb 0))))
-     (delete shards (where {:id (:id current)})))))
+        (do
+          ;まず不要シャード削除
+          (delete virtualshards (where {:shardid (:id current)}))
+          (delete shards (where {:id (:id current)}))
+
+          ;削除したデータの入れ先達
+          (let
+            [pshards (select shards (where {:groupname groupname}))
+             shardsAsc (sort-by :hashvalue (apply concat (for [shard pshards]
+                                                           (cons shard (for [v (select virtualshards (where {:shardid (:id shard)}))]
+                                                                         {:hashvalue (:hashvalue v) :url (:url shard) :user (:user shard) :password (:password shard)})))))
+             betweens (map #(list %1 %2) shardsAsc (conj (into [] (rest shardsAsc)) (first shardsAsc)))]
+             (for [r betweens]
+               (let [dest (first r)
+                     destdb {:classname "oracle.jdbc.OracleDriver" :subprotocol (:database group) :subname (:url dest) :user (:user dest) :password (:password dest)}
+                     hashcolumn (format (:hashfunction group) (:keycolumn group))
+                     selectquery (if (> (Integer/parseInt (:hashvalue (first r))) (Integer/parseInt (:hashvalue (second r))))
+                                   (format "SELECT * FROM %s WHERE %s >= ? OR %s < ? " groupname hashcolumn hashcolumn)
+                                   (format "SELECT * FROM %s WHERE %s BETWEEN ? AND ? " groupname hashcolumn))
+                     deletequery (if (> (Integer/parseInt (:hashvalue (first r))) (Integer/parseInt (:hashvalue (second r))))
+                                   (format "DELETE FROM %s WHERE %s >= ? OR %s < ? " groupname hashcolumn hashcolumn)
+                                   (format "DELETE FROM %s WHERE %s BETWEEN ? AND ? " groupname hashcolumn))]
+                   (with-open [sourcecon (sql/get-connection sourcedb)
+                               sourcestmt (sql/prepare-statement sourcecon selectquery)]
+                     (.setFetchSize sourcestmt 1000)
+                     (.setObject sourcestmt 1 (:hashvalue (first r)))
+                     (.setObject sourcestmt 2 (:hashvalue (second r)))
+                     (println (:subname sourcedb) "/" (:user sourcedb) "/" (:hashvalue current)  " = " selectquery (:hashvalue (first r)) (:hashvalue (second r)) "->" (:subname destdb) "/" (:user destdb) "/" (:hashvalue dest) )
+                     ;抽出もとから抜いて自分に一括登録
+                     (with-open [rseq (.executeQuery sourcestmt)]
+                       (transaction
+                         ;ここは現実化しないと大変なことになる
+                         (doall (for [splited (partition-all 10000 (resultset-seq rseq))]
+                                  (apply sql/db-do-prepared destdb
+                                    (format "INSERT INTO %s VALUES (%s)" groupname
+                                      (clojure.string/join ", " (repeat (.getColumnCount (.getMetaData rseq)) "?" )))
+                                    (for [row splited] (vals row)))))))
+                     ;元データの消し込み
+                     (sql/execute! sourcedb [deletequery (:hashvalue (first r)) (:hashvalue (second r))]))))))))))
 
 
