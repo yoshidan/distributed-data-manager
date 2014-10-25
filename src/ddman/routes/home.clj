@@ -80,3 +80,8 @@
   (GET "/group" [groupname] (group-page groupname))
   (POST "/release" [groupname url user] (release groupname url user))
   (POST "/group/init" [url username password dialect tables virtualcounts hashfunctions keycolumns] (init-group url username password dialect tables virtualcounts hashfunctions keycolumns)))
+
+
+
+(parse-opts args cli-options)
+[url user password sql outputfile]

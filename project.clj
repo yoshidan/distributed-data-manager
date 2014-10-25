@@ -25,8 +25,12 @@
     [(require 'pjstadig.humane-test-output)
      (pjstadig.humane-test-output/activate!)],
     :env {:dev true}}}
-  :jvm-opts
-  ["-server"]
+  :jvm-opts [
+              "-server"
+              "-Xms128M"
+              "-Xmx256M"
+              "-Xdebug"
+              "-Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=9900"]
   :dependencies
   [[selmer "0.6.9"]
    [log4j
